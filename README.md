@@ -195,3 +195,64 @@ certificate in their own trust store.
 Certificate pinning, explicit HTTP proxies, custom DNS/DoH, or already-running
 connections can bypass local routing; restart clients after installation. This is
 not a guaranteed override of every application's networking stack.
+
+### Future Podman containers
+
+On macOS, Podman's Linux VM has separate hosts and trust configuration. After
+installing the Mac bridge, configure the running default VM once:
+
+```sh
+bash scripts/podman-npm-bridge.sh install
+# Optional: select another running machine explicitly:
+bash scripts/podman-npm-bridge.sh install machine-name
+```
+
+The VM must share this checkout and your Mac bridge certificate under the same
+absolute paths (the default `/Users` share), and provide Python 3.11+ and the Fedora
+CA bundle. The installer verifies gateway connectivity before applying defaults.
+It preserves existing defaults using append-only certificate mounts/environment
+arrays and refuses conflicting hosts or certificate configuration.
+
+New containers use a hosts-file mapping to the Mac gateway, a read-only mount
+containing **only public certificates**, and trust settings for Node, curl and Python.
+The combined CA bundle retains the VM's existing trusted public/enterprise roots.
+No private bridge key is exposed, TLS verification remains enabled, and the Mac
+listener remains loopback-only. Verify without extra run flags:
+
+```sh
+podman run --rm node:latest npm view is-number version
+```
+
+These defaults apply automatically to `podman run`/`create`, not to certificate
+environment variables in image-build `RUN` steps. Builds inherit the hosts mapping
+and public certificate mount, but need an explicit build-only certificate setting:
+
+```sh
+podman build --env NODE_EXTRA_CA_CERTS=/run/dev-cache-npm-bridge/certificate.pem \
+  --unsetenv NODE_EXTRA_CA_CERTS .
+```
+
+For curl/Python build steps, also pass
+`--env SSL_CERT_FILE=/run/dev-cache-npm-bridge/ca-bundle.pem` and the corresponding
+`CURL_CA_BUNDLE`/`REQUESTS_CA_BUNDLE` variables if needed. Use `--unsetenv` for each
+added variable so machine-specific trust paths are not baked into the final image.
+
+Existing containers must be recreated. The installer briefly restarts active Podman
+API services to reload defaults, without stopping containers. Defaults persist across
+VM restarts; rerun setup after replacing the VM or renewing the Mac certificate.
+Run it once for each VM you use. To remove these defaults before uninstalling the
+Mac bridge:
+
+```sh
+bash scripts/podman-npm-bridge.sh uninstall
+```
+
+The generated VM configuration is
+`/etc/containers/containers.conf.d/90-dev-cache-npm-bridge.conf`; public trust material
+and the container base hosts file are in `/var/lib/dev-cache-npm-bridge/`.
+The base hosts file snapshots the VM's existing hosts entries at setup time; rerun
+setup after changing them. Container-specific CA bundles are not merged into the
+VM bundle, but Node's extra certificate setting preserves its built-in roots.
+Explicit environment/mount/hosts overrides, `--no-hosts`, isolated networking,
+custom DNS or pinned certificates can defeat the defaults. Applications ignoring
+these CA environment variables (for example Java) need their own trust setup.
