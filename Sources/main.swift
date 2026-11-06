@@ -556,7 +556,7 @@ func selfTest() throws {
 do {
     let launchedAsApp = CommandLine.arguments[0].contains("/DevCache.app/Contents/MacOS/")
     let command = CommandLine.arguments.dropFirst().first ?? (launchedAsApp ? "menubar" : "status")
-    let configurationFree = ["help", "--help", "-h", "self-test", "menu-test", "paths"]
+    let configurationFree = ["help", "--help", "-h", "self-test", "menu-test", "paths", "npm-bridge", "bridge-test"]
     let router = configurationFree.contains(command) ? Router() : try Router.configured()
     switch command {
     case "help", "--help", "-h":
@@ -577,6 +577,10 @@ do {
           daemon     Monitor mounted volumes once per second (run by launchd)
           menubar    Native menu-bar interface and cache manager (run by launchd)
           menu-test  Test native menu presentation without changing real cache routing
+          npm-bridge <identity.p12> [port] [--login-environment]
+                     Loopback HTTPS bridge from registry.npmjs.org to the approved npm feed
+          bridge-test
+                     Test registry request rewriting and streaming body framing
 
         Pause builds and package installations before migration or drive switches.
         After switching, restart programs that keep resolved cache paths or open files.
@@ -603,6 +607,23 @@ do {
         try selfTest()
     case "menu-test":
         try testMenuBar()
+    case "bridge-test":
+        try testNpmBridge()
+    case "npm-bridge":
+        var values = Array(CommandLine.arguments.dropFirst(2))
+        let loginEnvironment = values.last == "--login-environment"
+        if loginEnvironment { values.removeLast() }
+        guard values.count == 1 || values.count == 2 else {
+            throw RouterError("Usage: dev-cache npm-bridge <identity.p12> [port] [--login-environment]")
+        }
+        let port: UInt16
+        if values.count == 2 {
+            guard let value = UInt16(values[1]), value != 0 else { throw RouterError("Invalid bridge port") }
+            port = value
+        } else {
+            port = 443
+        }
+        try runNpmBridge(identityPath: values[0], port: port, loginEnvironment: loginEnvironment)
     case "menubar":
         guard router.exists(router.activated) else { throw RouterError("Run dev-cache migrate first") }
         runMenuBar(router: router)

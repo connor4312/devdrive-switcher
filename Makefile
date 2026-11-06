@@ -1,9 +1,9 @@
 SWIFTC := xcrun swiftc
 BINARY := .build/dev-cache
 APP := .build/DevCache.app
-SOURCES := Sources/main.swift Sources/MenuBar.swift
+SOURCES := Sources/main.swift Sources/MenuBar.swift Sources/NpmBridge.swift
 
-.PHONY: all test test-router test-menu app
+.PHONY: all test test-router test-menu test-bridge app
 
 all: $(BINARY)
 
@@ -11,13 +11,16 @@ $(BINARY): $(SOURCES)
 	mkdir -p .build
 	$(SWIFTC) -O -warnings-as-errors $(SOURCES) -o $@
 
-test: test-router test-menu
+test: test-router test-menu test-bridge
 
 test-router: $(BINARY)
 	$(BINARY) self-test
 
 test-menu: $(BINARY)
 	$(BINARY) menu-test
+
+test-bridge: $(BINARY)
+	$(BINARY) bridge-test
 
 app: $(BINARY) resources/Info.plist
 	mkdir -p $(APP)/Contents/MacOS

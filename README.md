@@ -116,3 +116,82 @@ dev-cache --help
 simulating absence, then restoring SSD routing. It **clears fallback caches** and
 requires Automatic mode, a connected SSD, and paused cache users. It does not test
 physical unmount events.
+
+## Optional npm registry bridge
+
+For an enterprise that permits only the approved npm feed, the native Swift bridge
+forwards hard-coded `https://registry.npmjs.org/...` requests to
+`https://packagefeedproxy.microsoft.io/npm/...`. It is independent of cache routing:
+
+### Setup
+
+Use a logged-in macOS account with Xcode Command Line Tools and administrator
+authorization available. Port 443 must be free on both loopback addresses, and the
+approved feed must be reachable. No SSD or cache-router installation is required.
+Run these commands from this checkout, **without sudo**:
+
+```sh
+make test-bridge
+bash scripts/npm-bridge.sh install
+```
+
+Installation prompts for administrator authorization to add IPv4/IPv6 `/etc/hosts` entries.
+It trusts a locally generated, **non-CA server certificate** in your login keychain,
+restricted to SSL, with a SAN for only `registry.npmjs.org`. Only install this if your
+enterprise permits local TLS interception. TLS verification is never disabled,
+including on upstream connections.
+The certificate expires after one year; uninstall/reinstall to renew it.
+
+Restart terminals and VS Code after installation, then verify ordinary registry
+requests without disabling certificate checks:
+
+```sh
+curl --fail --silent --show-error https://registry.npmjs.org/is-number -o /dev/null
+npm view is-number version --registry=https://registry.npmjs.org/
+launchctl print "gui/$(id -u)/local.dev-cache-npm-bridge"
+```
+
+Rerun the installer after rebuilding or pulling updates; it preserves the existing
+certificate and avoids duplicate hosts/shell entries. To undo the setup:
+
+```sh
+bash scripts/npm-bridge.sh uninstall
+```
+
+Restart clients after uninstalling too, so they drop the removed certificate setting.
+If installation or requests fail, inspect
+`~/.local/share/dev-cache-router/npm-bridge/agent.log`. The installer refuses
+conflicting hosts entries and Node CA overrides; do not disable TLS verification to
+work around these failures.
+
+### Operation and limitations
+
+The unprivileged login agent listens only on `127.0.0.1:443` and `[::1]:443`. It uses
+Apple's Network framework, streaming 64 KiB buffers with backpressure, without a third-party runtime,
+subprocess per request, or buffering whole packages. HTTP/1.x methods and
+Content-Length/chunked uploads are supported. Each request uses a separate upstream
+connection; pipelined requests are not forwarded. Headers are capped at 64 KiB,
+connections at 128, and idle connections expire after 60 seconds.
+Authorization/Cookie headers, request trailers, CONNECT, TRACE and protocol upgrades
+are rejected explicitly: this is for public feed traffic, not npm credentials or
+authenticated publishing. Response bodies and upstream redirects are preserved.
+
+State, the private TLS identity (and its password file), installed binary and logs live in
+`~/.local/share/dev-cache-router/npm-bridge/`. The separate launch agent is
+`~/Library/LaunchAgents/local.dev-cache-npm-bridge.plist`. Readiness is verified
+before changing hosts/trust; uninstall removes only this bridge's mapping and
+certificate, preserving unrelated settings and logs. If the service is stopped,
+registry requests fail closed until it is restarted or uninstalled.
+
+Programs using the macOS trust store (including `/usr/bin/curl`) need no additional
+configuration. The installer adds a marked `NODE_EXTRA_CA_CERTS` export to `~/.zshenv`
+and configures it in the login-session environment on each bridge startup. Uninstall
+removes only its marked line and matching login environment value. Installation
+refuses to overwrite existing Node CA overrides or a symlinked shell configuration.
+Restart already-running apps (including terminals and VS Code) to inherit the setting.
+Node's system-CA option alone does not recognize this leaf certificate on the tested
+machine. Clients with private CA bundles (some curl/Python/Java builds) need this
+certificate in their own trust store.
+Certificate pinning, explicit HTTP proxies, custom DNS/DoH, or already-running
+connections can bypass local routing; restart clients after installation. This is
+not a guaranteed override of every application's networking stack.
